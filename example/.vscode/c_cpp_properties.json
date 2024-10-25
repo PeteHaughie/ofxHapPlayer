@@ -1,0 +1,41 @@
+{
+  "env": {
+    "OF_ROOT": "c:/openFrameworks"
+  },
+  "configurations": [
+    {
+      "name": "Mac",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${env:OF_ROOT}/addons/**/src",
+        "${env:OF_ROOT}/libs/**",
+        "/usr/local/lib"
+      ],
+      "defines": [
+        "_DEBUG",
+        "UNICODE",
+        "_UNICODE"
+      ]
+    },
+    {
+      "name": "MSYS2",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${env:OF_ROOT}/addons/**/src",
+        "${env:OF_ROOT}/libs/**",
+        "c:/msys64/mingw64/"
+      ],
+      "defines": [
+        "_DEBUG",
+        "UNICODE",
+        "_UNICODE"
+      ],
+      "windowsSdkVersion": "10.0.19041.0",
+      "compilerPath": "c:/msys64/mingw64/bin/g++.exe",
+      "cStandard": "c17",
+      "cppStandard": "c++17",
+      "intelliSenseMode": "windows-gcc-x64"
+    }
+  ],
+  "version": 4
+}

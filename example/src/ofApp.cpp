@@ -33,7 +33,7 @@
 //--------------------------------------------------------------
 void ofApp::setup(){
     // Limit drawing to a sane rate
-    ofSetVerticalSync(true);
+    ofSetVerticalSync(false);
     
     ofBackground(0);
     
@@ -101,6 +101,11 @@ void ofApp::draw(){
             ofDrawBitmapStringHighlight("Movie is loading...", 20, 20);
         }
     }
+    ofFill();
+    ofSetColor(ofColor::black);
+    ofDrawRectangle(5, 15, 80, 20);
+    ofSetColor(ofColor::white);
+    ofDrawBitmapString(ofGetFrameRate(), 10, 30);
 }
 
 void ofApp::load(std::string movie)
@@ -193,7 +198,11 @@ void ofApp::gotMessage(ofMessage msg){
 
 //--------------------------------------------------------------
 void ofApp::dragEvent(ofDragInfo dragInfo){
-	vector< string > fileList = dragInfo.files;
+    // Convert each std::filesystem::path to a string
+    vector<string> fileList;
+    for (const auto& file : dragInfo.files) {
+        fileList.push_back(file.string()); // Explicitly convert to string
+    }
     load(fileList[0]);
 }
 

@@ -63,7 +63,7 @@
 ################################################################################
 # PROJECT_EXCLUSIONS =
 
-################################################################################
+###############################################################################
 # PROJECT LINKER FLAGS
 #	These flags will be sent to the linker when compiling the executable.
 #
@@ -77,7 +77,12 @@
 # add a runtime path to search for those shared libraries, since they aren't 
 # incorporated directly into the final executable application binary.
 # TODO: should this be a default setting?
-# PROJECT_LDFLAGS=-Wl,-rpath=./libs
+PROJECT_LDFLAGS += -Wl,-rpath,../libs,-rpath,/mingw64/bin
+PROJECT_LDFLAGS += -lsnappy
+PROJECT_LDFLAGS += -L/mingw64/lib/ffmpeg4.4
+PROJECT_LDFLAGS += -lswresample -lavutil -lavcodec -lavformat
+PROJECT_LDFLAGS += -lmingw32 -mwindows
+#PROJECT_LDFLAGS += -static
 
 ################################################################################
 # PROJECT DEFINES
@@ -138,5 +143,6 @@
 #		(default) PROJECT_CC = (blank)
 #   Note: Leave a leading space when adding list items with the += operator
 ################################################################################
-# PROJECT_CXX = 
-# PROJECT_CC = 
+#PROJECT_CXX =
+#PROJECT_CC =
+

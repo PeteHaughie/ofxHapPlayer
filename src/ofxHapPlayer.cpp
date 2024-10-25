@@ -43,7 +43,8 @@ extern "C" {
 #include <hap.h>
 }
 #if defined(TARGET_WIN32)
-#include <ppl.h>
+#include <future>
+#include <vector>
 #elif defined(TARGET_LINUX)
 #include <dispatch/dispatch.h>
 #endif
@@ -52,7 +53,8 @@ extern "C" {
 #define kofxHapPlayerBufferUSec INT64_C(250000)
 #define kofxHapPlayerUSecPerSec 1000000L
 
-namespace ofxHapPY {
+namespace ofxHapPY
+{
     static const string vertexShader = "void main(void)\
     {\
     gl_FrontColor = gl_Color;\
@@ -77,15 +79,39 @@ namespace ofxHapPY {
     /*
      Utility to round up to a multiple of 4 for DXT dimensions
      */
-    static int roundUpToMultipleOf4( int n )
+    static int roundUpToMultipleOf4(int n)
     {
-        if( 0 != ( n & 3 ) )
-            n = ( n + 3 ) & ~3;
+        if (0 != (n & 3))
+            n = (n + 3) & ~3;
         return n;
     }
 
+    // Add the missing function inside the namespace
+    static bool frameMatchesStream(unsigned int frame, uint32_t stream)
+    {
+        switch (stream)
+        {
+        case MKTAG('H', 'a', 'p', '1'):
+            if (frame == HapTextureFormat_RGB_DXT1)
+                return true;
+            break;
+        case MKTAG('H', 'a', 'p', '5'):
+            if (frame == HapTextureFormat_RGBA_DXT5)
+                return true;
+            break;
+        case MKTAG('H', 'a', 'p', 'Y'):
+            if (frame == HapTextureFormat_YCoCg_DXT5)
+                return true;
+            break;
+        default:
+            break;
+        }
+        return false;
+    }
+
 #if defined(TARGET_LINUX)
-    struct Work {
+    struct Work
+    {
         void *p;
         HapDecodeWorkFunction function;
     };
@@ -102,47 +128,39 @@ namespace ofxHapPY {
         dispatch_apply(count, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) {
             function(p, i);
         });
-#elif defined(TARGET_WIN32)
-        Concurrency::parallel_for(0U, count, [&](unsigned int i) {
-            function(p, i);
-        });
+#elif defined(TARGET_WIN32) || defined(TARGET_LINUX) // Cross-platform version for Windows/Linux
+        std::vector<std::future<void>> futures;
+        futures.reserve(count);
+
+        // Launch each decoding task asynchronously
+        for (unsigned int i = 0; i < count; ++i)
+        {
+            futures.push_back(std::async(std::launch::async, function, p, i));
+        }
+
+        // Wait for all tasks to complete
+        for (auto &f : futures)
+        {
+            f.get();
+        }
 #else
         struct Work w = {p, function};
         dispatch_apply_f(count, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), &w, decodeWrapper);
 #endif
     }
 
-    static bool frameMatchesStream(unsigned int frame, uint32_t stream)
-    {
-        switch (stream) {
-            case MKTAG('H', 'a', 'p', '1'):
-                if (frame == HapTextureFormat_RGB_DXT1)
-                    return true;
-                break;
-            case MKTAG('H', 'a', 'p', '5'):
-                if (frame == HapTextureFormat_RGBA_DXT5)
-                    return true;
-                break;
-            case MKTAG('H', 'a', 'p', 'Y'):
-                if (frame == HapTextureFormat_YCoCg_DXT5)
-                    return true;
-            default:
-                break;
-        }
-        return false;
-    }
-}
+} // End of namespace ofxHapPY
 
 // TODO:
 // 1.a What about AudioThread when paused? stopped?
 // 2. Fix sound_sync_test_hap.mov frequent audio position reset
 // 3. Pause in palindrome(low priority)
 
-ofxHapPlayer::ofxHapPlayer() :
-    _loaded(false), _videoStream(nullptr), _audioStreamIndex(-1), _frameTime(av_gettime_relative()), _playing(false),
-    _wantsUpload(false),
-    _demuxer(), _buffer(nullptr), _audioThread(nullptr), _audioOut(), _volume(1.0), _timeout(30000),
-    _positionOnLoad(0.0)
+ofxHapPlayer::ofxHapPlayer()
+    : _loaded(false), _videoStream(nullptr), _audioStreamIndex(-1), _frameTime(av_gettime_relative()), _playing(false),
+      _wantsUpload(false),
+      _demuxer(), _buffer(nullptr), _audioThread(nullptr), _audioOut(), _volume(1.0), _timeout(30000),
+      _positionOnLoad(0.0)
 {
     _clock.setPausedAt(true, 0);
     ofAddListener(ofEvents().update, this, &ofxHapPlayer::update);
@@ -150,9 +168,6 @@ ofxHapPlayer::ofxHapPlayer() :
 
 ofxHapPlayer::~ofxHapPlayer()
 {
-    /*
-    Close any loaded movie
-    */
     close();
     ofRemoveListener(ofEvents().update, this, &ofxHapPlayer::update);
 }

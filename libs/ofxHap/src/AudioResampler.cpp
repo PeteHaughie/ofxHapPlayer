@@ -27,8 +27,8 @@
 
 #include <ofxHap/AudioResampler.h>
 extern "C" {
-#include <libavformat/avformat.h>
-#include <libswresample/swresample.h>
+    #include <libavformat/avformat.h>
+    #include <libswresample/swresample.h>
 }
 #include <algorithm>
 #include <cmath>
