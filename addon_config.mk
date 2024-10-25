@@ -112,9 +112,9 @@ vs:
 	ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libswresample
 
 msys2:
-        ADDON_LIBS += bcrypt.lib
-        ADDON_LIBS += Secur32.lib
-        ADDON_INCLUDES_EXCLUDE = libs/ffmpeg/include/libavformat
-        ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libavutil
-        ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libavcodec
-        ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libswresample
+	ADDON_LIBS += bcrypt.lib
+	ADDON_LIBS += Secur32.lib
+	ADDON_INCLUDES_EXCLUDE = libs/ffmpeg/include/libavformat
+	ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libavutil
+	ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libavcodec
+	ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/include/libswresample

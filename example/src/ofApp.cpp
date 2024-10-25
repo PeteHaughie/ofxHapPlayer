@@ -198,11 +198,7 @@ void ofApp::gotMessage(ofMessage msg){
 
 //--------------------------------------------------------------
 void ofApp::dragEvent(ofDragInfo dragInfo){
-    // Convert each std::filesystem::path to a string
-    vector<string> fileList;
-    for (const auto& file : dragInfo.files) {
-        fileList.push_back(file.string()); // Explicitly convert to string
-    }
+	vector< string > fileList = dragInfo.files;
     load(fileList[0]);
 }
 
