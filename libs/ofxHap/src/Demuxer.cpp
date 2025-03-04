@@ -27,6 +27,7 @@
 
 #include <ofxHap/Demuxer.h>
 #include <ofxHap/Common.h>
+#include <ofLog.h>
 extern "C" {
 #include <libavformat/avformat.h>
 }
@@ -66,17 +67,27 @@ void ofxHap::Demuxer::threadMain(const std::string movie, PacketReceiver& receiv
         if (result == 0)
         {
             result = avformat_find_stream_info(fmt_ctx, NULL);
+	    ofLogNotice("ofxHap::Demuxer") << "Opened input file: " << movie;
+        }
+        else
+        {
+            ofLogError("ofxHap::Demuxer") << "Failed to open input file: " << movie << ", error: " << result;
         }
         if (result == 0)
         {
+	    ofLogNotice("ofxHap::Demuxer") << "Found stream info for file: " << movie;
             receiver.foundMovie(fmt_ctx->duration);
             for (unsigned int i = 0; i < fmt_ctx->nb_streams; i++) {
 #if OFX_HAP_HAS_CODECPAR
+		AVCodecParameters *codecpar = fmt_ctx->streams[i]->codecpar;
+		ofLogNotice("ofxHap::Demuxer") << "Stream " << i << ": codec_id=" << codecpar->codec_id << ", codec_type=" << codecpar->codec_type;
                 if (fmt_ctx->streams[i]->codecpar->codec_id == AV_CODEC_ID_HAP && videoStreamIndex == -1)
 #else
+		ofLogNotice("ofxHap::Demuxer") << "Stream " << i << ": codec_id=" << codec->codec_id << ", codec_type=" << codec->codec_type;
                 if (fmt_ctx->streams[i]->codec->codec_id == AV_CODEC_ID_HAP && videoStreamIndex == -1)
 #endif
                 {
+		    ofLogNotice("ofxHap::Demuxer") << "Found Hap video stream at index: " << i;
                     videoStreamIndex = i;
                 }
                 else
@@ -87,6 +98,7 @@ void ofxHap::Demuxer::threadMain(const std::string movie, PacketReceiver& receiv
 
             if (videoStreamIndex == -1)
             {
+		ofLogError("ofxHap::Demuxer") << "No Hap video stream found in file: " << movie;
                 result = AVERROR_INVALIDDATA;
             }
 
@@ -94,6 +106,10 @@ void ofxHap::Demuxer::threadMain(const std::string movie, PacketReceiver& receiv
             {
                 receiver.foundStream(fmt_ctx->streams[videoStreamIndex]);
             }
+        }
+        else
+        {
+            ofLogError("ofxHap::Demuxer") << "Failed to find stream info for file: " << movie << ", error: " << result;
         }
         if (result >= 0)
         {
@@ -103,6 +119,11 @@ void ofxHap::Demuxer::threadMain(const std::string movie, PacketReceiver& receiv
                 audioStreamIndex = result;
                 fmt_ctx->streams[audioStreamIndex]->discard = AVDISCARD_DEFAULT;
                 receiver.foundStream(fmt_ctx->streams[audioStreamIndex]);
+		ofLogNotice("ofxHap::Demuxer") << "Found audio stream at index: " << audioStreamIndex;
+            }
+            else
+            {
+                ofLogNotice("ofxHap::Demuxer") << "No audio stream found in file: " << movie;
             }
             result = 0; // Not an error to have no audio
         }

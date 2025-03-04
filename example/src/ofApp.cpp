@@ -193,8 +193,13 @@ void ofApp::gotMessage(ofMessage msg){
 
 //--------------------------------------------------------------
 void ofApp::dragEvent(ofDragInfo dragInfo){
-	vector< string > fileList = dragInfo.files;
-    load(fileList[0]);
+    vector<string> fileList;
+    for (const auto& path : dragInfo.files) {
+        fileList.push_back(path.string()); // Convert path to string
+    }
+    if (!fileList.empty()) {
+        load(fileList[0]);
+    }
 }
 
 ofRectangle ofApp::getBarRectangle() const

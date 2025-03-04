@@ -81,7 +81,7 @@ linux64:
 	ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/%
 	ADDON_INCLUDES_EXCLUDE += libs/snappy
 	ADDON_INCLUDES_EXCLUDE += libs/snappy/%
-	ADDON_LDFLAGS = -lsnappy -ldispatch
+	ADDON_LDFLAGS = -lsnappy
 
 linux:
 	ADDON_PKG_CONFIG_LIBRARIES = libavformat
@@ -94,7 +94,7 @@ linux:
 	ADDON_INCLUDES_EXCLUDE += libs/ffmpeg/%
 	ADDON_INCLUDES_EXCLUDE += libs/snappy
 	ADDON_INCLUDES_EXCLUDE += libs/snappy/%
-	ADDON_LDFLAGS = -lsnappy -ldispatch
+	ADDON_LDFLAGS = -lsnappy
 
 osx:
 	ADDON_LDFLAGS = -rpath @loader_path/../../../../../../../addons/ofxHapPlayer/libs

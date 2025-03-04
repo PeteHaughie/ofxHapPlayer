@@ -38,14 +38,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <ofxHap/MovieTime.h>
 extern "C" {
 #include <libavformat/avformat.h>
-#include <libavutil/time.h>
+#include <libavutil/time_utils.h>
 #include <libswresample/swresample.h>
 #include <hap.h>
 }
 #if defined(TARGET_WIN32)
 #include <ppl.h>
 #elif defined(TARGET_LINUX)
-#include <dispatch/dispatch.h>
+//#include <dispatch/dispatch.h>
 #endif
 
 // This amount will be bufferred before and after the playhead
@@ -53,27 +53,38 @@ extern "C" {
 #define kofxHapPlayerUSecPerSec 1000000L
 
 namespace ofxHapPY {
-    static const string vertexShader = "void main(void)\
+    static const string vertexShader = "precision mediump float;\
+    attribute vec4 a_Position;\
+    attribute vec2 a_TexCoord;\
+    attribute vec4 a_Color;\
+    varying vec2 v_TexCoord;\
+    varying vec4 v_Color;\
+    uniform mat4 u_MVPMatrix; // Model-View-Projection matrix (must be passed from CPU)\
+    void main()\
     {\
-    gl_FrontColor = gl_Color;\
-    gl_Position = ftransform();\
-    gl_TexCoord[0] = gl_MultiTexCoord0;\
-    }";
+        gl_Position = u_MVPMatrix * a_Position; // Manual transformation\
+        v_TexCoord = a_TexCoord;\
+        v_Color = a_Color;\
+    }\
+    ";
 
-    static const string fragmentShader = "uniform sampler2D cocgsy_src;\
+    static const string fragmentShader = "precision mediump float;\
+    uniform sampler2D cocgsy_src;\
+    varying vec2 v_TexCoord;\
+    varying vec4 v_Color;\
     const vec4 offsets = vec4(-0.50196078431373, -0.50196078431373, 0.0, 0.0);\
     void main()\
     {\
-    vec4 CoCgSY = texture2D(cocgsy_src, gl_TexCoord[0].xy);\
-    CoCgSY += offsets;\
-    float scale = ( CoCgSY.z * ( 255.0 / 8.0 ) ) + 1.0;\
-    float Co = CoCgSY.x / scale;\
-    float Cg = CoCgSY.y / scale;\
-    float Y = CoCgSY.w;\
-    vec4 rgba = vec4(Y + Co - Cg, Y + Cg, Y - Co - Cg, 1.0);\
-    gl_FragColor = rgba * gl_Color;\
-    }";
-
+        vec4 CoCgSY = texture2D(cocgsy_src, v_TexCoord);\
+        CoCgSY += offsets;\
+        float scale = (CoCgSY.z * (255.0 / 8.0)) + 1.0;\
+        float Co = CoCgSY.x / scale;\
+        float Cg = CoCgSY.y / scale;\
+        float Y = CoCgSY.w;\
+        vec4 rgba = vec4(Y + Co - Cg, Y + Cg, Y - Co - Cg, 1.0);\
+        gl_FragColor = rgba * v_Color; // OpenGL ES 2.0 still supports gl_FragColor\
+    }\
+    ";
     /*
      Utility to round up to a multiple of 4 for DXT dimensions
      */
@@ -108,7 +119,17 @@ namespace ofxHapPY {
         });
 #else
         struct Work w = {p, function};
-        dispatch_apply_f(count, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), &w, decodeWrapper);
+        // dispatch_apply_f(count, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), &w, decodeWrapper);
+#pragma omp parallel
+	{
+    #pragma omp single
+    		{
+		        for (size_t i = 0; i < count; i++) {
+            			#pragma omp task firstprivate(i)
+            			decodeWrapper(&w, i);
+      			}
+		}
+	}
 #endif
     }
 
