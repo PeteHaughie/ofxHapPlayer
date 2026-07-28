@@ -942,6 +942,8 @@ void ofxHapPlayer::setVideoPTSLoaded(int64_t pts, bool round_up)
 
 void ofxHapPlayer::setPTSLoaded(int64_t pts)
 {
+    _active.clear();
+    _decodedFrame.invalidate();
     _clock.syncAt(pts, _frameTime);
     if (_audioThread)
     {
@@ -1001,21 +1003,26 @@ void ofxHapPlayer::setVolume(float volume)
     }
 }
 
-/*
- // TODO: need clock to understand frame numbers so we can call setVideoPTSLoaded()
 void ofxHapPlayer::setFrame(int frame)
 {
-    if (_demuxer != nullptr && getTotalNumFrames() > 0)
+    std::lock_guard<std::mutex> guard(_lock);
+    if (_loaded && _videoStream && _videoStream->nb_frames > 0)
     {
-        _demuxer->seekFrame(std::max(0, std::min(frame, getTotalNumFrames())));
+        frame = std::max(0, std::min(frame, (int)_videoStream->nb_frames - 1));
+        int64_t pts = av_rescale_q(frame,
+                                   av_inv_q(_videoStream->avg_frame_rate),
+                                   _videoStream->time_base);
+        setVideoPTSLoaded(pts, false);
     }
 }
-*/
 
 int ofxHapPlayer::getCurrentFrame() const
 {
-    if (_decodedFrame.isValid() && _decodedFrame.index != -1)
-        return _decodedFrame.index;
+    std::lock_guard<std::mutex> guard(_lock);
+    if (_decodedFrame.isValid() && _videoStream)
+    {
+        return (int)_decodedFrame.pts;
+    }
     return 0;
 }
 
