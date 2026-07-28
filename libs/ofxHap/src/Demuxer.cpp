@@ -149,6 +149,11 @@ void ofxHap::Demuxer::threadMain(const std::string movie, PacketReceiver& receiv
                                 result = av_read_frame(fmt_ctx, packet);
                                 if (result >= 0)
                                 {
+                                    if (packet->stream_index == videoStreamIndex)
+                                    {
+                                        packet->pos = av_index_search_timestamp(fmt_ctx->streams[videoStreamIndex], packet->pts, 0);
+                                    }
+
                                     receiver.readPacket(packet);
                                     if (packet->stream_index == videoStreamIndex)
                                     {

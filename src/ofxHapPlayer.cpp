@@ -464,6 +464,7 @@ void ofxHapPlayer::update(ofEventArgs & args)
                 {
                     _decodedFrame.pts = packet->pts;
                     _decodedFrame.duration = packet->duration;
+                    _decodedFrame.index = packet->pos;
                     _wantsUpload = true;
                 }
                 else
@@ -1001,23 +1002,22 @@ void ofxHapPlayer::setVolume(float volume)
 }
 
 /*
- // TODO: need clock to understand frame numbers so we have correct position on setFrame()
+ // TODO: need clock to understand frame numbers so we can call setVideoPTSLoaded()
 void ofxHapPlayer::setFrame(int frame)
 {
-    if (_demuxer != nullptr && _totalNumFrames > 0)
+    if (_demuxer != nullptr && getTotalNumFrames() > 0)
     {
-        _demuxer->seekFrame(std::max(0, std::min(frame, _totalNumFrames)));
+        _demuxer->seekFrame(std::max(0, std::min(frame, getTotalNumFrames())));
     }
 }
 */
-/*
- // TODO:
+
 int ofxHapPlayer::getCurrentFrame() const
 {
-    int frameNumber = 0;
-    return frameNumber;
+    if (_decodedFrame.isValid() && _decodedFrame.index != -1)
+        return _decodedFrame.index;
+    return 0;
 }
-*/
 
 int ofxHapPlayer::getTotalNumFrames() const
 {

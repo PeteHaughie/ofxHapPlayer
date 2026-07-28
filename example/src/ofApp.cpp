@@ -125,6 +125,18 @@ void ofApp::keyPressed(int key){
     {
         player.setVolume(player.getVolume() - 0.1);
     }
+    else if (key == OF_KEY_RIGHT)
+    {
+        player.setPaused(true);
+        player.nextFrame();
+        lastMovement = ofGetSystemTimeMillis();
+    }
+    else if (key == OF_KEY_LEFT)
+    {
+        player.setPaused(true);
+        player.previousFrame();
+        lastMovement = ofGetSystemTimeMillis();
+    }
 }
 
 //--------------------------------------------------------------

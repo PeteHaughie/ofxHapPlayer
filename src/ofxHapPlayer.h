@@ -93,8 +93,8 @@ public:
     virtual void                setVolume(float volume) override; // 0..1
     virtual void                setLoopState(ofLoopType state) override;
     virtual void                setSpeed(float speed) override;
-/*  virtual void                setFrame(int frame);  // frame 0 = first frame... // TODO: */
-/*  virtual int                 getCurrentFrame() const; // TODO: */
+/*  virtual void                setFrame(int frame) override;  // frame 0 = first frame... // TODO: */
+    virtual int                 getCurrentFrame() const override;
     virtual int                 getTotalNumFrames() const override;
     virtual ofLoopType          getLoopState() const override;
 
@@ -155,6 +155,7 @@ private:
         std::vector<char>   buffer;
         int64_t             pts;
         int64_t             duration;
+        int64_t             index;
     };
     mutable std::mutex  _lock;
     bool                _loaded;
