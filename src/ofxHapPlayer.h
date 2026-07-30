@@ -56,7 +56,9 @@ public:
     
     virtual void                play() override;
     virtual void                stop() override;
-    
+
+    bool canPlaythrough(const std::string &name);
+
     virtual bool                isFrameNew() const override;
     virtual ofPixels&           getPixels() override;
     virtual const ofPixels&     getPixels() const override;
@@ -91,7 +93,7 @@ public:
     virtual void                setVolume(float volume) override; // 0..1
     virtual void                setLoopState(ofLoopType state) override;
     virtual void                setSpeed(float speed) override;
-/*  virtual void                setFrame(int frame) override;  // frame 0 = first frame... // TODO: */
+    virtual void                setFrame(int frame) override;  // frame 0 = first frame...
     virtual int                 getCurrentFrame() const override;
     virtual int                 getTotalNumFrames() const override;
     virtual ofLoopType          getLoopState() const override;
