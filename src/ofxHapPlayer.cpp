@@ -682,15 +682,20 @@ bool ofxHapPlayer::canPlaythrough(const std::string& name)
     AVFormatContext* formatContext = avformat_alloc_context();
     if (!formatContext)
     {
-        ofLog() << "Failed to allocate AVFormatContext for: " << name;
+        ofLogError("ofxHapPlayer") << "Failed to allocate AVFormatContext for: " << name;
         return false;
     }
 
     if (avformat_open_input(&formatContext, name.c_str(), nullptr, nullptr) != 0)
     {
-        ofLog() << "Failed to open input for: " << name;
-        avformat_free_context(formatContext);
+        ofLogError("ofxHapPlayer") << "Failed to open input for: " << name;
+        avformat_close_input(&formatContext);
         return false;
+    }
+
+    if (avformat_find_stream_info(formatContext, nullptr) < 0)
+    {
+        ofLogWarning("ofxHapPlayer") << "Failed to find stream info for: " << name;
     }
 
     bool canPlay = false;
@@ -703,7 +708,7 @@ bool ofxHapPlayer::canPlaythrough(const std::string& name)
         if (stream->codec->codec_id == AV_CODEC_ID_HAP)
 #endif
         {
-            ofLog() << "Found HAP stream in: " << name;
+            ofLogNotice("ofxHapPlayer") << "Found HAP stream in: " << name;
             canPlay = true;
             break;
         }
@@ -712,7 +717,7 @@ bool ofxHapPlayer::canPlaythrough(const std::string& name)
     avformat_close_input(&formatContext);
     if (canPlay == false)
     {
-        ofLog() << "Failed to find HAP stream in: " << name;
+        ofLogWarning("ofxHapPlayer") << "Failed to find HAP stream in: " << name;
     }
     return canPlay;
 }
@@ -1018,11 +1023,13 @@ void ofxHapPlayer::setFrame(int frame)
         if (start == AV_NOPTS_VALUE)
             start = 0;
 
-        int64_t totalFrames = av_rescale_q(_videoStream->duration,
-                                           _videoStream->time_base,
-                                           av_inv_q(fps));
+        int64_t totalFrames = _videoStream->nb_frames > 0
+                                  ? _videoStream->nb_frames
+                                  : av_rescale_q(_videoStream->duration,
+                                                 _videoStream->time_base,
+                                                 av_inv_q(fps));
         if (totalFrames > 0)
-            frame = std::max(0, std::min(frame, (int)totalFrames - 1));
+            frame = std::max(0, std::min(frame, static_cast<int>(std::min(totalFrames - 1, static_cast<int64_t>(INT_MAX)))));
         else
             frame = std::max(0, frame);
 
@@ -1049,9 +1056,11 @@ int ofxHapPlayer::getCurrentFrame() const
             start = 0;
 
         int64_t framePts = _decodedFrame.pts - start;
-        return (int)av_rescale_q(framePts,
-                                 _videoStream->time_base,
-                                 av_inv_q(fps));
+        if (framePts < 0)
+            framePts = 0;
+        return static_cast<int>(av_rescale_q(framePts,
+                                             _videoStream->time_base,
+                                             av_inv_q(fps)));
     }
     return 0;
 }

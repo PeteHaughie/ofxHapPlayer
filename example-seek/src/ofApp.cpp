@@ -45,9 +45,6 @@ void ofApp::draw() {
 
 void ofApp::drawFrameNumber() {
 	int currentFrame = player.getCurrentFrame();
-	int totalFrames = player.getTotalNumFrames();
-	float pos = player.getPosition();
-	float dur = player.getDuration();
 
 	ofDrawBitmapStringHighlight(
 		ofToString(currentFrame),
