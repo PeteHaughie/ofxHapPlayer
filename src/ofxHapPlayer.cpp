@@ -677,7 +677,7 @@ void ofxHapPlayer::stop()
     setPaused(true, true);
 }
 
-bool ofxHapPlayer::canPlaythrough(const std::string& name)
+bool ofxHapPlayer::canPlaythrough(const std::string& name) const
 {
     AVFormatContext* formatContext = avformat_alloc_context();
     if (!formatContext)
@@ -708,7 +708,6 @@ bool ofxHapPlayer::canPlaythrough(const std::string& name)
         if (stream->codec->codec_id == AV_CODEC_ID_HAP)
 #endif
         {
-            ofLogNotice("ofxHapPlayer") << "Found HAP stream in: " << name;
             canPlay = true;
             break;
         }
