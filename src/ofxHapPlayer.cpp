@@ -710,7 +710,6 @@ bool ofxHapPlayer::canPlaythrough(const std::string& name)
     }
 
     avformat_close_input(&formatContext);
-    avformat_free_context(formatContext);
     if (canPlay == false)
     {
         ofLog() << "Failed to find HAP stream in: " << name;
@@ -944,6 +943,7 @@ void ofxHapPlayer::setPTSLoaded(int64_t pts)
 {
     _active.clear();
     _decodedFrame.invalidate();
+    _wantsUpload = false;
     _clock.syncAt(pts, _frameTime);
     if (_audioThread)
     {
@@ -1006,12 +1006,29 @@ void ofxHapPlayer::setVolume(float volume)
 void ofxHapPlayer::setFrame(int frame)
 {
     std::lock_guard<std::mutex> guard(_lock);
-    if (_loaded && _videoStream && _videoStream->nb_frames > 0)
+    if (_loaded && _videoStream)
     {
-        frame = std::max(0, std::min(frame, (int)_videoStream->nb_frames - 1));
-        int64_t pts = av_rescale_q(frame,
-                                   av_inv_q(_videoStream->avg_frame_rate),
-                                   _videoStream->time_base);
+        AVRational fps = _videoStream->avg_frame_rate;
+        if (fps.num <= 0 || fps.den <= 0)
+            fps = _videoStream->r_frame_rate;
+        if (fps.num <= 0 || fps.den <= 0)
+            return;
+
+        int64_t start = _videoStream->start_time;
+        if (start == AV_NOPTS_VALUE)
+            start = 0;
+
+        int64_t totalFrames = av_rescale_q(_videoStream->duration,
+                                           _videoStream->time_base,
+                                           av_inv_q(fps));
+        if (totalFrames > 0)
+            frame = std::max(0, std::min(frame, (int)totalFrames - 1));
+        else
+            frame = std::max(0, frame);
+
+        int64_t pts = start + av_rescale_q(frame,
+                                           av_inv_q(fps),
+                                           _videoStream->time_base);
         setVideoPTSLoaded(pts, false);
     }
 }
@@ -1021,7 +1038,20 @@ int ofxHapPlayer::getCurrentFrame() const
     std::lock_guard<std::mutex> guard(_lock);
     if (_decodedFrame.isValid() && _videoStream)
     {
-        return (int)_decodedFrame.pts;
+        AVRational fps = _videoStream->avg_frame_rate;
+        if (fps.num <= 0 || fps.den <= 0)
+            fps = _videoStream->r_frame_rate;
+        if (fps.num <= 0 || fps.den <= 0)
+            return 0;
+
+        int64_t start = _videoStream->start_time;
+        if (start == AV_NOPTS_VALUE)
+            start = 0;
+
+        int64_t framePts = _decodedFrame.pts - start;
+        return (int)av_rescale_q(framePts,
+                                 _videoStream->time_base,
+                                 av_inv_q(fps));
     }
     return 0;
 }
