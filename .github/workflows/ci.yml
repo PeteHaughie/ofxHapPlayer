@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Tier-1 (pure geometry/format/capability) and Tier-2 (CPU decode mirror)
+  # tests, plus glslangValidator checking every shader dialect/format.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install glslang
+        run: sudo apt-get update && sudo apt-get install -y glslang-tools
+
+      - name: Tier 1 + Tier 2 tests
+        run: make -C tests all
+
+      - name: Validate all shader variants
+        run: make -C tests shaders
+
+  # Same tests under AddressSanitizer + UndefinedBehaviorSanitizer.
+  tests-sanitized:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ASan + UBSan
+        run: make -C tests all-asan
+
+  # Best-effort full build of the example against a released openFrameworks,
+  # which compiles ofxHapPlayer.cpp (including the desktop paths). The GLES
+  # compile gate and the GPU decode test run in the MoshBox ARM64 Docker build
+  # and on Pi hardware respectively; see HANDOFF-GLES2.md.
+  build-example-linux:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      OF_VERSION: 0.12.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: addon
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libavformat-dev libavcodec-dev libavutil-dev libswresample-dev \
+            libtbb-dev libsnappy-dev \
+            libgl1-mesa-dev libglu1-mesa-dev libglew-dev libglfw3-dev \
+            libfreetype6-dev libcairo2-dev libasound2-dev libopenal-dev \
+            libsndfile1-dev libudev-dev libx11-dev libxrandr-dev libxi-dev \
+            libxcursor-dev libxinerama-dev libpugixml-dev liburiparser-dev \
+            librtaudio-dev libcurl4-openssl-dev libgtk-3-dev libmpg123-dev
+
+      - name: Download openFrameworks
+        run: |
+          curl -fL -o of.tar.gz \
+            "https://github.com/openframeworks/openFrameworks/releases/download/${OF_VERSION}/of_v${OF_VERSION}_linux64gcc6_release.tar.gz"
+          mkdir -p "$HOME/of"
+          tar -xzf of.tar.gz -C "$HOME/of" --strip-components=1
+
+      - name: Build example
+        run: |
+          rm -rf "$HOME/of/addons/ofxHAPPlayer"
+          ln -s "$GITHUB_WORKSPACE/addon" "$HOME/of/addons/ofxHAPPlayer"
+          make -C "$HOME/of/addons/ofxHAPPlayer/example" -j2

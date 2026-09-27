@@ -19,6 +19,16 @@ DerivedData
 .idea/
 example/bin/
 obj/
+# Tests
+*.dSYM/
+tests/test_internal
+tests/test_decode
+tests/test_internal-asan
+tests/test_decode-asan
+tests/emit_shaders
+tests/shaders_out/
+tests/gl/bin/
+tests/gl/obj/
 #Visual Studio
 *.sdf
 *.suo

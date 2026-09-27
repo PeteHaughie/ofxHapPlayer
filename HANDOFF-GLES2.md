@@ -1,12 +1,13 @@
 # HANDOFF — GLES2 (Raspberry Pi) HAP playback
 
-Status: **compiles and boots, but HAP video does not render correctly yet.**
-This branch (`feat/gles2-texture`, tip `3abadef`) makes the addon *build* for
-`linuxaarch64` / `TARGET_OPENGLES`. It does not complete the feature.
+Status: **implemented and covered by tests; Pi hardware run still outstanding.**
 
-## Why this branch exists
+This branch (`feat/gles2-texture`) makes the addon decode HAP on GLES (and
+desktop core profiles), where there is no S3TC/DXT sampler and no `GL_BGRA`.
 
-The stock addon's `getTexture()` uploads HAP frames as compressed GPU textures:
+## Why this exists
+
+The desktop path uploads HAP frames as compressed GPU textures:
 
 ```cpp
 internalFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;   // Hap 1
@@ -15,54 +16,70 @@ _texture.allocate(texData, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV);
 glCompressedTexSubImage2D(...);
 ```
 
-None of `GL_COMPRESSED_*_S3TC_*`, `GL_BGRA`, or
-`GL_UNSIGNED_INT_8_8_8_8_REV` exist in GLES (2 **or** 3). They are desktop-GL
-extension enums, so the file simply does not compile for the Pi. Moving the app
-to `glesVersion = 3` does **not** help: S3TC is not part of GLES at all, and the
-HAP source data is DXT, not ETC2/ASTC.
+None of those enums exist in GLES. Moving to `glesVersion = 3` does not help:
+S3TC is not part of GLES at all, and the HAP source data is DXT, not ETC2/ASTC.
 
-## What this branch changes
+## What the addon now does
 
-Two commits:
+1. **Block plane upload (`getTexture`).** Under `TARGET_OPENGLES` the raw
+   DXT1/DXT5/YCoCg blocks from `HapDecode()` are uploaded verbatim as an
+   uncompressed RGBA8 texture, laid out so no CPU repack is needed:
 
-1. **`ofxHapPlayer.cpp` — uncompressed upload under `TARGET_OPENGLES`.**
-   The HAP decoder (`HapDecode()` in `libs/hap`) still produces raw DXT1 / DXT5 /
-   YCoCg-DXT5 blocks. On GLES the texture is allocated at **block resolution**
-   (`w/4 × h/4`) as `GL_RGBA` / `GL_UNSIGNED_BYTE`, and the block bytes are
-   uploaded with `glTexSubImage2D`. Desktop paths are untouched.
-2. **`ofxHapPlayer.{h,cpp}` — `isHapQ()` accessor.** Returns true for a
-   HapY stream. Callers use it to route Hap Q to their own YCoCg shader instead
-   of the addon's bundled GLSL 120 one (which does not build on a core profile /
-   GLES context).
+   - `texelsPerBlock = bytesPerBlock / 4` (DXT1 = 2, DXT5/YCoCg = 4)
+   - texture width  = `(roundUp4(w) / 4) * texelsPerBlock`
+   - texture height = `roundUp4(h) / 4`
 
-## What is still missing (the actual feature)
+   Geometry, byte-budget validation and the codec-tag → `HapTextureFormat`
+   mapping live in `src/ofxHapInternal.h` and are unit-tested.
 
-The upload now hands the GPU a plane of packed DXT/YCoCg blocks. **Something must
-expand those blocks in a fragment shader — that decoder is not written.**
+2. **Addon-owned decode shaders (`src/ofxHapShaders.h`).** DXT1, DXT5 and
+   YCoCg-DXT5 decoders written in float-only GLSL (GLSL ES 1.00 has no integer
+   bit ops). Three dialects: `GLSL_ES_100` (GLES2/3), `GLSL_120` (legacy
+   desktop), `GLSL_150` (desktop core). `getShader()` returns the right one and
+   `draw()` renders a full-resolution quad through it on GLES/core; desktop
+   DXT1/DXT5 keep the hardware S3TC path. The legacy desktop Hap Q shader is
+   unchanged for GL<3.
 
-- **Hap Q (`HapY`, YCoCg-DXT5)** — the consuming app (MoshBox) already has a
-  GLES2 YCoCg shader (`bin/data/shaders/GLES2/hapq.*`) and routes to it via
-  `isHapQ()`. This path should work.
-- **Hap 1 / Hap 5 (DXT1 / DXT5)** — **no GLES decode shader exists.** They will
-  render as 1/4-scale block garbage. Needs a `dxt1`/`dxt5` GLSL ES 1.00 shader
-  that, given the block plane and the sub-block coordinate, decodes the 4×4
-  block (565 colour endpoints + interpolation; DXT5 adds alpha).
-- **No capability gating.** Nothing yet stops HAP sources being offered on a
-  device that cannot run them (e.g. Pi 3 / vc4). Intended behaviour, per the
-  MoshBox tags: **Pi 4+ and desktop offer HAP; Pi 3 is frozen to input devices.**
-  Gate at runtime (board / `TARGET_RASPBERRY_PI` + GLES2), not by shipping a
-  separate binary.
+3. **Accessors.** `getHapTextureFormat()` is the general form of `isHapQ()`
+   (which is kept as a lock-guarded wrapper). `isHapSupported()` reports
+   whether the device can decode Hap (board + fragment `highp`).
 
-## Recommended next steps
+## What changed vs the earlier attempt
 
-1. Decide the accessor shape. `isHapQ()` is narrow; a
-   `getHapTextureFormat()` returning `HapTextureFormat_{RGB_DXT1,RGBA_DXT5,YCoCg_DXT5}`
-   (from `libs/hap/src/hap.h`) is more general and lets the caller pick DXT1 vs
-   DXT5 vs YCoCg in one place. Prefer that before merging.
-2. Write the DXT1/DXT5 decode shaders in the app (matching the existing
-   `hapq.*` pattern — the app already owns shader-based decode).
-3. Add the capability gate so Pi 3 excludes HAP sources.
-4. Test on a Pi 4 with a real HAP file (`https://fate-suite.ffmpeg.org/hap/`).
+The earlier branch allocated an RGBA texture at `w/4 × h/4`, which is only the
+right byte count for DXT5/YCoCg. DXT1 is 8 B/block, so the upload over-read
+the buffer, and `getWidth()/4` under-uploaded non-multiple-of-4 frames. Both
+are fixed, and the upload now refuses a frame whose decoded size does not match
+the plane geometry.
+
+## Tests
+
+- `make -C tests all` — Tier 1 (geometry, byte budget, format mapping, board
+  capability) and Tier 2 (a portable C++ mirror of the shader arithmetic
+  compared against an independent reference DXT decoder, plus a block-plane
+  addressing invariant). Runs in CI, including under ASan/UBSan.
+- `make -C tests shaders` — emits every dialect/format and validates it with
+  `glslangValidator`.
+- `tests/gl/` — GPU FBO test that renders synthetic planes through the real
+  shaders and compares to the CPU reference. **Scaffold / unfinished:** it
+  compiles and runs but its synthetic-plane comparison does not yet match the
+  CPU reference exactly, so it is not wired into the required CI gate. The
+  decode algorithm is verified exactly by `tests/test_decode.cpp`; finishing
+  this GPU test is a follow-up.
+- The desktop example builds and links cleanly against a released OF.
+
+## Still outstanding
+
+- **Finish the GPU FBO test (`tests/gl`).** It compiles and already proved the
+  shader geometry works, but its synthetic-plane comparison does not yet agree
+  exactly with the CPU reference, so it is not in the CI gate. The decode math
+  is covered exactly by the CPU mirror (`tests/test_decode.cpp`).
+- **Pi 4 hardware run.** The GPU test (`tests/gl`) has not been run on a Pi
+  yet; that is the one verification that cannot be done on a dev machine.
+- **Pi 3 gate wiring.** `isHapSupported()` returns false on Pi 1/2/3 as
+  intended; the consuming app (MoshBox) still needs to call it to exclude Hap
+  sources. That is app-side work, tracked outside this addon.
+- **HapM / Hap Q+A (two-texture frames).** Still unsupported, unchanged.
 
 ## Build context
 
@@ -71,9 +88,3 @@ Built into MoshBox's ARM64 artifact from
 (`OFX_HAPPLAYER_SHA`) and installs `libavformat-dev`, `libsnappy-dev`,
 `libtbb-dev` (required by the addon's `linuxaarch64` config, which excludes the
 bundled ffmpeg/snappy and links the system ones plus `-lsnappy`).
-
-## Verified
-
-- Compiles and links for `linuxaarch64` (GLES2) via the MoshBox Docker build.
-- Desktop (non-`TARGET_OPENGLES`) code paths are byte-for-byte unchanged.
-- Not yet verified on hardware — see "What is still missing".

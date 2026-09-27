@@ -78,7 +78,36 @@ Note that if you access the texture directly for a Hap Q movie, you will need to
     {
         shader->end();
     }
-    
+
+This is only necessary on desktop legacy contexts. On GLES (and desktop core
+profiles), `player.draw()` owns the decode shader for every Hap format, so
+prefer calling `draw()` and letting the addon handle it.
+
+You can ask what a stream decodes to:
+
+    unsigned int format = player.getHapTextureFormat();
+    // one of HapTextureFormat_RGB_DXT1, HapTextureFormat_RGBA_DXT5,
+    // HapTextureFormat_YCoCg_DXT5, or 0 if no Hap stream is loaded
+
+OpenGL ES / Raspberry Pi
+------------------------
+
+GLES has no S3TC/DXT sampler and no `GL_BGRA`, so on GLES the addon uploads
+the decoder's raw DXT blocks as an uncompressed RGBA "block plane" and expands
+each 4x4 block with its own shader (GLSL ES 1.00). No S3TC-capable GPU is
+required.
+
+Check whether the device can run this before offering Hap sources:
+
+    if (ofxHapPlayer::isHapSupported())
+    {
+        // offer Hap media
+    }
+
+This returns false on Raspberry Pi 1/2/3 (VideoCore IV) and on GLES contexts
+without fragment `highp`. Pi 4/5 (V3D), desktop and platforms without a GPU
+barrier return true.
+
 Credits and License
 -------------------
 

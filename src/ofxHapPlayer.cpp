@@ -32,6 +32,9 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
  */
 #include "ofxHapPlayer.h"
+#include "ofxHapShaders.h"
+#include <fstream>
+#include <iterator>
 #include <ofxHap/Common.h>
 #include <ofxHap/AudioThread.h>
 #include <ofxHap/RingBuffer.h>
@@ -81,9 +84,7 @@ namespace ofxHapPY {
      */
     static int roundUpToMultipleOf4( int n )
     {
-        if( 0 != ( n & 3 ) )
-            n = ( n + 3 ) & ~3;
-        return n;
+        return ofxHapInternal::roundUpToMultipleOf4(n);
     }
 
 #if defined(TARGET_MINGW) || defined(TARGET_LINUX)
@@ -144,6 +145,21 @@ namespace ofxHapPY {
         return false;
     }
 }
+
+#if defined(TARGET_OPENGLES) && defined(TARGET_LINUX)
+namespace {
+    std::string readWholeFile(const char* path)
+    {
+        std::ifstream file(path, std::ios::in | std::ios::binary);
+        if (!file)
+        {
+            return std::string();
+        }
+        return std::string((std::istreambuf_iterator<char>(file)),
+                           std::istreambuf_iterator<char>());
+    }
+}
+#endif
 
 // TODO:
 // 1.a What about AudioThread when paused? stopped?
@@ -318,7 +334,10 @@ void ofxHapPlayer::close()
     _videoStream = nullptr;
     _audioStreamIndex = -1;
     _shader.unload();
+    _shaderFormat = 0;
     _texture.clear();
+    _blockPlane = {};
+    _blitMesh.clear();
     _decodedFrame.clear();
     _loaded = false;
     _error.clear();
@@ -504,24 +523,83 @@ ofTexture* ofxHapPlayer::getTexture()
     std::lock_guard<std::mutex> guard(_lock);
     if (_wantsUpload && _videoStream)
     {
-        GLenum internalFormat;
+        const unsigned int hapFormat = streamTextureFormat();
+#if defined(TARGET_OPENGLES)
+        // GLES has no S3TC/DXT sampler and no GL_BGRA / GL_UNSIGNED_INT_8_8_8_8_REV.
+        // The HAP decoder hands us raw DXT1/DXT5/YCoCg blocks, so upload them
+        // uncompressed as an RGBA8 "block plane" and expand each 4x4 block in
+        // the addon shader (see getShader()). The plane packs each block's raw
+        // bytes into consecutive RGBA texels with no CPU repack.
+        const ofxHapInternal::BlockPlane plane =
 #if OFX_HAP_HAS_CODECPAR
-        switch (_videoStream->codecpar->codec_tag) {
+            ofxHapInternal::blockPlaneFor(_videoStream->codecpar->width,
+                                          _videoStream->codecpar->height,
+                                          hapFormat);
 #else
-        switch (_videoStream->codec->codec_tag) {
+            ofxHapInternal::blockPlaneFor(_videoStream->codec->width,
+                                          _videoStream->codec->height,
+                                          hapFormat);
 #endif
-            case MKTAG('H', 'a', 'p', '1'):
+        if (!plane.valid)
+        {
+            ofLogError("ofxHapPlayer") << "Unsupported Hap texture format for GLES upload";
+            _wantsUpload = false;
+            return &_texture;
+        }
+        if (!ofxHapInternal::blockPlaneMatches(plane, _decodedFrame.buffer.size()))
+        {
+            ofLogError("ofxHapPlayer") << "Decoded Hap frame is " << _decodedFrame.buffer.size()
+                                       << " bytes, expected " << plane.expectedBytes
+                                       << " - refusing upload";
+            _wantsUpload = false;
+            return &_texture;
+        }
+        if (_texture.isAllocated() &&
+            (_blockPlane.textureWidth != plane.textureWidth ||
+             _blockPlane.textureHeight != plane.textureHeight))
+        {
+            // Stream changed shape (or a new movie reuses this player).
+            _texture.clear();
+        }
+        if (_texture.isAllocated() == false)
+        {
+            ofTextureData texData;
+            texData.width = plane.textureWidth;
+            texData.height = plane.textureHeight;
+            texData.textureTarget = GL_TEXTURE_2D;
+            texData.glInternalFormat = GL_RGBA;
+            _texture.allocate(texData, GL_RGBA, GL_UNSIGNED_BYTE);
+            // The plane holds raw bytes, not image data: NEAREST is mandatory
+            // so each texel is read back exactly.
+            _texture.setTextureMinMagFilter(GL_NEAREST, GL_NEAREST);
+            _texture.setTextureWrap(GL_CLAMP_TO_EDGE, GL_CLAMP_TO_EDGE);
+            _blockPlane = plane;
+        }
+
+        _texture.bind();
+        glTexSubImage2D(GL_TEXTURE_2D,
+            0,
+            0,
+            0,
+            plane.textureWidth,
+            plane.textureHeight,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            _decodedFrame.buffer.data());
+        _texture.unbind();
+        _wantsUpload = false;
+#else
+        GLenum internalFormat;
+        switch (hapFormat) {
+            case HapTextureFormat_RGB_DXT1:
                 internalFormat = GL_COMPRESSED_RGB_S3TC_DXT1_EXT;
                 break;
-            case MKTAG('H', 'a', 'p', '5'):
-            case MKTAG('H', 'a', 'p', 'Y'):
+            case HapTextureFormat_RGBA_DXT5:
+            case HapTextureFormat_YCoCg_DXT5:
                 internalFormat = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT;
                 break;
-            case MKTAG('H', 'a', 'p', 'M'):
-                // TODO: HapM
-                // TODO: break;
             default:
-                // TODO: fail
+                // TODO: HapM / unsupported
                 internalFormat = GL_RGBA;
                 break;
         }
@@ -542,24 +620,17 @@ ofTexture* ofxHapPlayer::getTexture()
             texData.height = ofxHapPY::roundUpToMultipleOf4(_videoStream->codec->height);
 #endif
             texData.textureTarget = GL_TEXTURE_2D;
-#if defined(TARGET_OPENGLES)
-            // GLES has no S3TC/DXT and no GL_BGRA / GL_UNSIGNED_INT_8_8_8_8_REV.
-            // The HAP decoder still hands us DXT1/DXT5/YCoCg blocks, so upload
-            // them uncompressed as RGBA bytes at *block* resolution (w/4 x h/4)
-            // and let a fragment shader expand each 4x4 block (see getShader()).
-            // This keeps Hap playback working on vc4 (GLES2) and v3d.
-            texData.width /= 4;
-            texData.height /= 4;
-            texData.glInternalFormat = GL_RGBA;
-            _texture.allocate(texData, GL_RGBA, GL_UNSIGNED_BYTE);
-#else
             texData.glInternalFormat = internalFormat;
             _texture.allocate(texData, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV);
-#endif
 
             // Now store the actual dimensions so drawing is correct
+#if OFX_HAP_HAS_CODECPAR
             _texture.texData.width = _videoStream->codecpar->width;
             _texture.texData.height = _videoStream->codecpar->height;
+#else
+            _texture.texData.width = _videoStream->codec->width;
+            _texture.texData.height = _videoStream->codec->height;
+#endif
             _texture.texData.tex_t = _texture.texData.width / _texture.texData.tex_w;
             _texture.texData.tex_u = _texture.texData.height / _texture.texData.tex_h;
 
@@ -573,17 +644,6 @@ ofTexture* ofxHapPlayer::getTexture()
 
         _texture.bind();
 
-#if defined(TARGET_OPENGLES)
-        glTexSubImage2D(GL_TEXTURE_2D,
-            0,
-            0,
-            0,
-            _texture.getWidth() / 4,
-            _texture.getHeight() / 4,
-            GL_RGBA,
-            GL_UNSIGNED_BYTE,
-            _decodedFrame.buffer.data());
-#else
 #if defined(TARGET_OSX)
         if (ofGetGLRenderer()->getGLVersionMajor() < 3)
         {
@@ -618,24 +678,89 @@ ofTexture* ofxHapPlayer::getTexture()
             glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
         }
 #endif
-#endif
         _texture.unbind();
         _wantsUpload = false;
+#endif
     }
     return &_texture;
+}
+
+unsigned int ofxHapPlayer::streamTextureFormat() const
+{
+    if (!_videoStream)
+    {
+        return 0;
+    }
+#if OFX_HAP_HAS_CODECPAR
+    return ofxHapInternal::textureFormatForCodecTag(_videoStream->codecpar->codec_tag);
+#else
+    return ofxHapInternal::textureFormatForCodecTag(_videoStream->codec->codec_tag);
+#endif
+}
+
+void ofxHapPlayer::setupDecodeShader(unsigned int hapFormat)
+{
+    if (_shader.isLoaded() && _shaderFormat == hapFormat)
+    {
+        return;
+    }
+    if (_shader.isLoaded())
+    {
+        _shader.unload();
+    }
+    ofxHapShaders::Dialect dialect = ofxHapShaders::GLSL_ES_100;
+#if !defined(TARGET_OPENGLES)
+    // Reached only from a desktop core-profile context (GLSL_150); the legacy
+    // path uses the original fixed-function shader and never calls this.
+    dialect = ofxHapShaders::GLSL_150;
+#endif
+    bool success = _shader.setupShaderFromSource(GL_VERTEX_SHADER, ofxHapShaders::vertexShader(dialect));
+    if (success)
+    {
+        success = _shader.setupShaderFromSource(GL_FRAGMENT_SHADER, ofxHapShaders::fragmentShader(dialect, hapFormat));
+    }
+    if (success)
+    {
+        _shader.linkProgram();
+    }
+    if (!_shader.isLoaded())
+    {
+        ofLogError("ofxHapPlayer") << "Failed to build Hap decode shader";
+    }
+    else
+    {
+        _shaderFormat = hapFormat;
+    }
 }
 
 ofShader *ofxHapPlayer::getShader()
 {
     std::lock_guard<std::mutex> guard(_lock);
-#if OFX_HAP_HAS_CODECPAR
-    if (_videoStream && _videoStream->codecpar->codec_tag == MKTAG('H', 'a', 'p', 'Y'))
-#else
-    if (_videoStream && _videoStream->codec->codec_tag == MKTAG('H', 'a', 'p', 'Y'))
-#endif
+    const unsigned int hapFormat = streamTextureFormat();
+    if (hapFormat == 0)
     {
-        if (_shader.isLoaded() == false)
+        return nullptr;
+    }
+#if defined(TARGET_OPENGLES)
+    // Every Hap format is decoded by the addon shader on GLES.
+    setupDecodeShader(hapFormat);
+    return _shader.isLoaded() ? &_shader : nullptr;
+#else
+    // Desktop GPUs decode DXT1/DXT5 in hardware via S3TC; only Hap Q needs
+    // a shader. On a core profile that shader must be GLSL 150.
+    if (hapFormat != HapTextureFormat_YCoCg_DXT5)
+    {
+        return nullptr;
+    }
+    if (_shader.isLoaded() == false)
+    {
+        if (ofGetGLRenderer()->getGLVersionMajor() >= 3)
         {
+            setupDecodeShader(hapFormat);
+        }
+        else
+        {
+            // Original fixed-function shader for the legacy GL2 profile.
             bool success = _shader.setupShaderFromSource(GL_VERTEX_SHADER, ofxHapPY::vertexShader);
             if (success)
             {
@@ -646,20 +771,53 @@ ofShader *ofxHapPlayer::getShader()
                 _shader.linkProgram();
             }
         }
-        if (_shader.isLoaded()) return &_shader;
     }
-    return nullptr;
+    return _shader.isLoaded() ? &_shader : nullptr;
+#endif
 }
 
 string ofxHapPlayer::getMoviePath() const {
 	return _moviePath;
 }
 
+unsigned int ofxHapPlayer::getHapTextureFormat() const {
+    std::lock_guard<std::mutex> guard(_lock);
+    return streamTextureFormat();
+}
+
 bool ofxHapPlayer::isHapQ() const {
-#if OFX_HAP_HAS_CODECPAR
-    return _videoStream && _videoStream->codecpar->codec_tag == MKTAG('H', 'a', 'p', 'Y');
+    return getHapTextureFormat() == HapTextureFormat_YCoCg_DXT5;
+}
+
+bool ofxHapPlayer::isHapSupported()
+{
+#if defined(TARGET_OPENGLES)
+#if defined(TARGET_LINUX)
+    // Pi 1/2/3 (VideoCore IV) cannot run the block-decode shader.
+    static const bool boardSupported = []() {
+        const std::string model = readWholeFile("/proc/device-tree/model");
+        const std::string hardware = readWholeFile("/proc/cpuinfo");
+        return ofxHapInternal::hapSupportedForBoard(model, hardware);
+    }();
+    if (!boardSupported)
+    {
+        return false;
+    }
+#endif
+    // The byte-unpacking math needs highp in the fragment stage.
+    if (ofGetGLRenderer())
+    {
+        GLint range[2] = { 0, 0 };
+        GLint precision = 0;
+        glGetShaderPrecisionFormat(GL_FRAGMENT_SHADER, GL_HIGH_FLOAT, range, &precision);
+        if (range[0] <= 0 || precision <= 0)
+        {
+            return false;
+        }
+    }
+    return true;
 #else
-    return _videoStream && _videoStream->codec->codec_tag == MKTAG('H', 'a', 'p', 'Y');
+    return true;
 #endif
 }
 
@@ -667,10 +825,55 @@ void ofxHapPlayer::draw(float x, float y) {
     draw(x,y, getWidth(), getHeight());
 }
 
+void ofxHapPlayer::drawDecoded(float x, float y, float w, float h)
+{
+    ofShader *sh = getShader();
+    if (!sh || !_texture.isAllocated())
+    {
+        return;
+    }
+    if (_blitMesh.getNumVertices() != 4)
+    {
+        _blitMesh.clear();
+        _blitMesh.setMode(OF_PRIMITIVE_TRIANGLE_STRIP);
+        _blitMesh.addVertex(glm::vec3(0.0f));
+        _blitMesh.addVertex(glm::vec3(0.0f));
+        _blitMesh.addVertex(glm::vec3(0.0f));
+        _blitMesh.addVertex(glm::vec3(0.0f));
+        _blitMesh.addTexCoord(glm::vec2(0.0f, 0.0f));
+        _blitMesh.addTexCoord(glm::vec2(1.0f, 0.0f));
+        _blitMesh.addTexCoord(glm::vec2(0.0f, 1.0f));
+        _blitMesh.addTexCoord(glm::vec2(1.0f, 1.0f));
+    }
+    _blitMesh.setVertex(0, glm::vec3(x, y, 0.0f));
+    _blitMesh.setVertex(1, glm::vec3(x + w, y, 0.0f));
+    _blitMesh.setVertex(2, glm::vec3(x, y + h, 0.0f));
+    _blitMesh.setVertex(3, glm::vec3(x + w, y + h, 0.0f));
+
+    sh->begin();
+    sh->setUniformTexture("hap_src", _texture, 0);
+    sh->setUniform2f("hapVideoSize", getWidth(), getHeight());
+    sh->setUniform2f("hapTexSize",
+                     static_cast<float>(_blockPlane.textureWidth),
+                     static_cast<float>(_blockPlane.textureHeight));
+    _blitMesh.draw();
+    sh->end();
+}
+
 void ofxHapPlayer::draw(float x, float y, float w, float h) {
     ofTexture *t = getTexture();
     if (t->isAllocated())
     {
+#if defined(TARGET_OPENGLES)
+        if (getShader())
+        {
+            drawDecoded(x, y, w, h);
+        }
+        else
+        {
+            t->draw(x, y, w, h);
+        }
+#else
         ofShader *sh = getShader();
         if (sh)
         {
@@ -681,6 +884,7 @@ void ofxHapPlayer::draw(float x, float y, float w, float h) {
         {
             sh->end();
         }
+#endif
     }
 }
 

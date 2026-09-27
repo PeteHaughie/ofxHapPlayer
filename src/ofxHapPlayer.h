@@ -30,6 +30,7 @@
 
 #include "ofMain.h"
 #include <vector>
+#include "ofxHapInternal.h"
 #include <ofxHap/Clock.h>
 #include <ofxHap/PacketCache.h>
 #include <ofxHap/Demuxer.h>
@@ -84,10 +85,23 @@ public:
     virtual ofPixelFormat       getPixelFormat() const override;
     virtual string              getMoviePath() const;
     virtual bool				getHapAvailable() const; // TODO: delete (and mvar)?
-    // True when the stream is Hap Q (HapY) and therefore needs YCoCg decoding.
-    // Use this instead of getShader() to avoid building the addon's GLSL 120
-    // shader on a core profile context.
+    /*
+     The HapTextureFormat constant the current video stream decodes to
+     (HapTextureFormat_RGB_DXT1 / RGBA_DXT5 / YCoCg_DXT5), or 0 when no Hap
+     stream is loaded. This is the general form of isHapQ().
+     */
+    unsigned int                getHapTextureFormat() const;
+    /*
+     Deprecated: prefer getHapTextureFormat(). Retained for source
+     compatibility. True when the stream is Hap Q (HapY).
+     */
     bool                        isHapQ() const;
+    /*
+     True when this device can decode Hap in the addon (correct board and,
+     on GLES, fragment highp). Callers should use this to decide whether to
+     offer Hap sources at all. Safe to call before load().
+     */
+    static bool                 isHapSupported();
 	
     virtual float               getPosition() const override;
     virtual float               getSpeed() const override;
@@ -136,6 +150,13 @@ private:
     void            update(ofEventArgs& args);
     void            updatePTS();
     void            read(ofxHap::TimeRangeSequence& sequence);
+    // Codec tag of the loaded video stream mapped to a HapTextureFormat
+    // (0 when there is no decodable Hap stream). Caller must hold _lock.
+    unsigned int    streamTextureFormat() const;
+    // Build _shader to decode hapFormat for the current context.
+    void            setupDecodeShader(unsigned int hapFormat);
+    // Draw the block plane through _shader at full resolution.
+    void            drawDecoded(float x, float y, float w, float h);
     class AudioOutput : public ofBaseSoundOutput {
     public:
         AudioOutput();
@@ -173,7 +194,10 @@ private:
     ofxHap::Clock       _clock;
     uint64_t            _frameTime;
     ofShader            _shader;
+    unsigned int        _shaderFormat = 0;
     ofTexture           _texture;
+    ofxHapInternal::BlockPlane _blockPlane = {};
+    ofMesh              _blitMesh;
     bool                _playing;
     bool                _wantsUpload;
 	string              _moviePath;
