@@ -84,6 +84,10 @@ public:
     virtual ofPixelFormat       getPixelFormat() const override;
     virtual string              getMoviePath() const;
     virtual bool				getHapAvailable() const; // TODO: delete (and mvar)?
+    // True when the stream is Hap Q (HapY) and therefore needs YCoCg decoding.
+    // Use this instead of getShader() to avoid building the addon's GLSL 120
+    // shader on a core profile context.
+    bool                        isHapQ() const;
 	
     virtual float               getPosition() const override;
     virtual float               getSpeed() const override;
