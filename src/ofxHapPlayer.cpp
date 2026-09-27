@@ -528,7 +528,7 @@ ofTexture* ofxHapPlayer::getTexture()
         if (_texture.isAllocated() == false)
         {
             /*
-             Create our texture for DXT upload
+             Create our texture for upload.
              */
             ofTextureData texData;
 
@@ -542,8 +542,20 @@ ofTexture* ofxHapPlayer::getTexture()
             texData.height = ofxHapPY::roundUpToMultipleOf4(_videoStream->codec->height);
 #endif
             texData.textureTarget = GL_TEXTURE_2D;
+#if defined(TARGET_OPENGLES)
+            // GLES has no S3TC/DXT and no GL_BGRA / GL_UNSIGNED_INT_8_8_8_8_REV.
+            // The HAP decoder still hands us DXT1/DXT5/YCoCg blocks, so upload
+            // them uncompressed as RGBA bytes at *block* resolution (w/4 x h/4)
+            // and let a fragment shader expand each 4x4 block (see getShader()).
+            // This keeps Hap playback working on vc4 (GLES2) and v3d.
+            texData.width /= 4;
+            texData.height /= 4;
+            texData.glInternalFormat = GL_RGBA;
+            _texture.allocate(texData, GL_RGBA, GL_UNSIGNED_BYTE);
+#else
             texData.glInternalFormat = internalFormat;
             _texture.allocate(texData, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV);
+#endif
 
             // Now store the actual dimensions so drawing is correct
             _texture.texData.width = _videoStream->codecpar->width;
@@ -561,6 +573,17 @@ ofTexture* ofxHapPlayer::getTexture()
 
         _texture.bind();
 
+#if defined(TARGET_OPENGLES)
+        glTexSubImage2D(GL_TEXTURE_2D,
+            0,
+            0,
+            0,
+            _texture.getWidth() / 4,
+            _texture.getHeight() / 4,
+            GL_RGBA,
+            GL_UNSIGNED_BYTE,
+            _decodedFrame.buffer.data());
+#else
 #if defined(TARGET_OSX)
         if (ofGetGLRenderer()->getGLVersionMajor() < 3)
         {
@@ -594,6 +617,7 @@ ofTexture* ofxHapPlayer::getTexture()
         {
             glPixelStorei(GL_UNPACK_CLIENT_STORAGE_APPLE, GL_FALSE);
         }
+#endif
 #endif
         _texture.unbind();
         _wantsUpload = false;
