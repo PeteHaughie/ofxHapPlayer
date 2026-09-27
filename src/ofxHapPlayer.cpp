@@ -631,6 +631,14 @@ string ofxHapPlayer::getMoviePath() const {
 	return _moviePath;
 }
 
+bool ofxHapPlayer::isHapQ() const {
+#if OFX_HAP_HAS_CODECPAR
+    return _videoStream && _videoStream->codecpar->codec_tag == MKTAG('H', 'a', 'p', 'Y');
+#else
+    return _videoStream && _videoStream->codec->codec_tag == MKTAG('H', 'a', 'p', 'Y');
+#endif
+}
+
 void ofxHapPlayer::draw(float x, float y) {
     draw(x,y, getWidth(), getHeight());
 }

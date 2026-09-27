@@ -65,7 +65,10 @@ public:
 
     virtual ofTexture *         getTexture();
     virtual ofShader *          getShader();
-    virtual float               getWidth() const override;
+    // True when the stream is Hap Q (HapY) and therefore needs YCoCg decoding.
+    // Use this instead of getShader() to avoid building the addon's GLSL 120
+    // shader on a core profile context.
+    bool                        isHapQ() const;    virtual float               getWidth() const override;
     virtual float               getHeight() const override;
     
     virtual bool                isPaused() const override;
